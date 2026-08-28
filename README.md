@@ -1,20 +1,32 @@
-# GiftLoop
+# Privacy Policy
 
-A Flutter app for keeping track of gift ideas for the people you care about.
+Last updated: August 28, 2026
 
-## Getting Started
+This Privacy Policy explains how GiftLoop handles user information.
 
-```sh
-flutter pub get
-flutter run
-```
+## Information Collection
 
-A few resources to get you started if this is your first Flutter project:
+GiftLoop does not collect any personal data.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## Third-Party Services
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+The App do not use third-party services.
+
+## Data Sharing
+
+GiftLoop does not sell or rent personal information to third parties.
+
+## Data Retention
+
+Data is retained only as long as necessary for app functionality, legal compliance, or support purposes.
+
+## Children’s Privacy
+
+GiftLoop does not have restriction to children's age, and it does not knowingly collect personal information from children.
+
+## Contact
+
+If you have questions about this Privacy Policy, contact:
+
+Themis Kavour
+themis.kavour@icloud.com
