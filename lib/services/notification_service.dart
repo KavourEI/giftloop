@@ -25,6 +25,11 @@ class NotificationService {
     await _plugin.initialize(
       settings: const InitializationSettings(android: android, iOS: ios, macOS: macOS),
     );
+    await _plugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.requestNotificationsPermission();
+
     _initialized = true;
   }
 
@@ -79,7 +84,11 @@ class NotificationService {
         body: 'Time to get a gift! You have ${person.giftIdeas.length} gift idea(s) saved.',
         scheduledDate: tz.TZDateTime.from(reminderDate, tz.local),
         notificationDetails: details,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        // Inexact so no exact-alarm permission is needed. The reminder fires a
+        // week ahead of the birthday, so a delivery window of minutes or hours
+        // is immaterial. A future settings page can offer exact timing (and a
+        // configurable lead time) behind a runtime permission request.
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         matchDateTimeComponents: DateTimeComponents.dayOfMonthAndTime,
       );
     } catch (e) {
