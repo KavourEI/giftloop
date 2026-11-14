@@ -103,15 +103,21 @@ class AppTheme {
           ),
           iconTheme: const IconThemeData(color: charcoal),
         ),
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
+        // Rounded rectangle, not a circle: a circle clips the label of an
+        // extended FAB such as "Add Gift Idea".
+        floatingActionButtonTheme: FloatingActionButtonThemeData(
           backgroundColor: coral,
           foregroundColor: Colors.white,
-          shape: CircleBorder(),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           elevation: 4,
+          extendedPadding: const EdgeInsets.symmetric(horizontal: 22),
+          extendedTextStyle:
+              GoogleFonts.nunito(fontSize: 16, fontWeight: FontWeight.w700),
         ),
         chipTheme: ChipThemeData(
           backgroundColor: softGrey,
-          selectedColor: coral.withOpacity(0.15),
+          selectedColor: coral.withValues(alpha: 0.15),
           labelStyle:
               GoogleFonts.nunito(fontSize: 13, fontWeight: FontWeight.w600),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

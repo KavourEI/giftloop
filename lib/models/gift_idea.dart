@@ -25,6 +25,19 @@ class GiftIdea {
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
+  /// Price with its currency, e.g. "€25", "\$40", "50 CHF".
+  String? get priceLabel {
+    final price = estimatedPrice;
+    if (price == null) return null;
+    final amount = price == price.roundToDouble()
+        ? price.toStringAsFixed(0)
+        : price.toStringAsFixed(2);
+    const codeToSymbol = {'USD': '\$', 'EUR': '€', 'GBP': '£'};
+    final cur = codeToSymbol[currency] ?? currency ?? '€';
+    // Single-character symbols go in front; codes such as CHF go after.
+    return cur.length == 1 ? '$cur$amount' : '$amount $cur';
+  }
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'title': title,

@@ -2,8 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:uuid/uuid.dart';
+import '../l10n/strings.dart';
 import '../models/gift_idea.dart';
+import '../services/settings_service.dart';
 import '../utils/app_theme.dart';
+import '../widgets/category_dialog.dart';
+
+/// Dropdown value for the "create new category" entry.
+const _createCategoryValue = '__create__';
 
 class AddEditGiftScreen extends StatefulWidget {
   final GiftIdea? gift;
@@ -25,6 +31,7 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
   String _currency = '€';
   String? _category;
   bool _isPurchased = false;
+  int _categoryFieldVersion = 0;
 
   final _currencies = ['€', '\$', '£', '¥', '₹', 'CHF', 'AUD', 'CAD'];
 
@@ -41,9 +48,21 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
     _storeNameController = TextEditingController(text: g?.storeName ?? '');
     _storeLocationController =
         TextEditingController(text: g?.storeLocation ?? '');
+    final price = g?.estimatedPrice;
     _priceController = TextEditingController(
-        text: g?.estimatedPrice?.toStringAsFixed(0) ?? '');
-    _currency = g?.currency ?? '€';
+        text: price == null
+            ? ''
+            : price == price.roundToDouble()
+                ? price.toStringAsFixed(0)
+                : price.toStringAsFixed(2));
+    // Older gifts were saved with the currency code 'USD' by default.
+    _currency = switch (g?.currency) {
+      null => '€',
+      'USD' => '\$',
+      'EUR' => '€',
+      'GBP' => '£',
+      final c => _currencies.contains(c) ? c : '€',
+    };
     _category = g?.category;
     _isPurchased = g?.isPurchased ?? false;
   }
@@ -62,7 +81,8 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
   void _save() {
     if (!_formKey.currentState!.validate()) return;
 
-    final priceText = _priceController.text.trim();
+    // Greek keyboards type a comma as the decimal separator.
+    final priceText = _priceController.text.trim().replaceAll(',', '.');
     final price =
         priceText.isNotEmpty ? double.tryParse(priceText) : null;
 
@@ -91,11 +111,69 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
     Navigator.pop(context, gift);
   }
 
+  Future<void> _onCategoryChanged(String? value) async {
+    if (value != _createCategoryValue) {
+      setState(() => _category = value);
+      return;
+    }
+    final created = await showCreateCategoryDialog(context);
+    if (!mounted) return;
+    // Rebuild the field even when cancelled, so it stops showing the
+    // "create" entry as the selection.
+    setState(() {
+      _categoryFieldVersion++;
+      if (created != null) _category = created;
+    });
+  }
+
+  Widget _buildCategoryDropdown(S s) {
+    return ListenableBuilder(
+      listenable: SettingsService.instance,
+      builder: (context, _) {
+        final options = [
+          ...giftCategories,
+          ...SettingsService.instance.customCategories,
+        ];
+        // Keep a category that is no longer listed (deleted custom category,
+        // or one that came with a shared card) so the dropdown can show it.
+        if (_category != null && !options.contains(_category)) {
+          options.add(_category!);
+        }
+        return DropdownButtonFormField<String>(
+          initialValue: _category,
+          key: ValueKey('$_category#$_categoryFieldVersion'),
+          decoration: InputDecoration(
+            hintText: s.selectCategory,
+            prefixIcon: const Icon(Icons.category_rounded),
+          ),
+          isExpanded: true,
+          items: [
+            ...options.map((c) => DropdownMenuItem(
+                  value: c,
+                  child: Text(s.categoryLabel(c),
+                      style: const TextStyle(fontSize: 14)),
+                )),
+            DropdownMenuItem(
+              value: _createCategoryValue,
+              child: Text(s.createCategory,
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.coral)),
+            ),
+          ],
+          onChanged: _onCategoryChanged,
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final s = S.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isEditing ? 'Edit Gift Idea' : 'New Gift Idea'),
+        title: Text(_isEditing ? s.editGiftIdea : s.newGiftIdea),
         leading: IconButton(
           icon: const Icon(Icons.close_rounded),
           onPressed: () => Navigator.pop(context),
@@ -104,7 +182,7 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
           TextButton(
             onPressed: _save,
             child: Text(
-              _isEditing ? 'Save' : 'Add',
+              _isEditing ? s.save : s.add,
               style: TextStyle(
                 color: AppTheme.coral,
                 fontWeight: FontWeight.w700,
@@ -122,53 +200,38 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Title
-              _Label('Gift name *'),
+              _Label(s.giftNameLabel),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _titleController,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  hintText: 'e.g. Wireless headphones, Book, Perfume...',
-                  prefixIcon: Icon(Icons.card_giftcard_rounded),
+                decoration: InputDecoration(
+                  hintText: s.giftNameHint,
+                  prefixIcon: const Icon(Icons.card_giftcard_rounded),
                 ),
                 validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'Name is required' : null,
+                    v == null || v.trim().isEmpty ? s.nameRequired : null,
               ).animate().fadeIn(duration: 300.ms),
 
               const SizedBox(height: 20),
 
               // Category
-              _Label('Category'),
+              _Label(s.category),
               const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: _category,
-                decoration: const InputDecoration(
-                  hintText: 'Select a category',
-                  prefixIcon: Icon(Icons.category_rounded),
-                ),
-                isExpanded: true,
-                items: giftCategories
-                    .map((c) => DropdownMenuItem(
-                          value: c,
-                          child: Text(c,
-                              style: const TextStyle(fontSize: 14)),
-                        ))
-                    .toList(),
-                onChanged: (v) => setState(() => _category = v),
-              ).animate().fadeIn(delay: 50.ms),
+              _buildCategoryDropdown(s).animate().fadeIn(delay: 50.ms),
 
               const SizedBox(height: 20),
 
               // Description
-              _Label('Description'),
+              _Label(s.description),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _descriptionController,
                 maxLines: 3,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  hintText: 'Notes, details, size, color preferences...',
-                  prefixIcon: Padding(
+                decoration: InputDecoration(
+                  hintText: s.descriptionHint,
+                  prefixIcon: const Padding(
                     padding: EdgeInsets.only(bottom: 40),
                     child: Icon(Icons.notes_rounded),
                   ),
@@ -178,7 +241,7 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
               const SizedBox(height: 20),
 
               // Price
-              _Label('Estimated price'),
+              _Label(s.estimatedPrice),
               const SizedBox(height: 8),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -209,16 +272,18 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
+                    // No currency icon here: the currency is chosen on the
+                    // left, and a fixed "\$" icon contradicted it.
                     child: TextFormField(
                       controller: _priceController,
-                      keyboardType: TextInputType.number,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [
                         FilteringTextInputFormatter.allow(
-                            RegExp(r'^\d+\.?\d{0,2}')),
+                            RegExp(r'^\d*[.,]?\d{0,2}')),
                       ],
                       decoration: const InputDecoration(
                         hintText: '0.00',
-                        prefixIcon: Icon(Icons.attach_money_rounded),
                       ),
                     ),
                   ),
@@ -228,7 +293,7 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
               const SizedBox(height: 20),
 
               // Link
-              _Label('Online link'),
+              _Label(s.onlineLink),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _linkController,
@@ -241,7 +306,7 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
                   if (v == null || v.trim().isEmpty) return null;
                   final uri = Uri.tryParse(v.trim());
                   if (uri == null || !uri.hasScheme) {
-                    return 'Please enter a valid URL (include https://)';
+                    return s.invalidUrl;
                   }
                   return null;
                 },
@@ -250,26 +315,26 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
               const SizedBox(height: 20),
 
               // Store info
-              _Label('Store / Shop name'),
+              _Label(s.storeName),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _storeNameController,
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  hintText: 'e.g. Amazon, Zara, Local bookstore...',
-                  prefixIcon: Icon(Icons.store_rounded),
+                decoration: InputDecoration(
+                  hintText: s.storeNameHint,
+                  prefixIcon: const Icon(Icons.store_rounded),
                 ),
               ).animate().fadeIn(delay: 150.ms),
 
               const SizedBox(height: 16),
-              _Label('Store location / Address'),
+              _Label(s.storeLocation),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _storeLocationController,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  hintText: 'e.g. City Centre Mall, Floor 2...',
-                  prefixIcon: Icon(Icons.location_on_rounded),
+                decoration: InputDecoration(
+                  hintText: s.storeLocationHint,
+                  prefixIcon: const Icon(Icons.location_on_rounded),
                 ),
               ).animate().fadeIn(delay: 175.ms),
 
@@ -280,12 +345,12 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: _isPurchased
-                      ? AppTheme.mint.withOpacity(0.1)
+                      ? AppTheme.mint.withValues(alpha: 0.1)
                       : Colors.white,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: _isPurchased
-                        ? AppTheme.mint.withOpacity(0.4)
+                        ? AppTheme.mint.withValues(alpha: 0.4)
                         : Colors.grey.shade200,
                   ),
                 ),
@@ -297,10 +362,11 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Mark as purchased',
-                              style: TextStyle(fontWeight: FontWeight.w700)),
+                          Text(s.markPurchased,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700)),
                           Text(
-                            'Check this off once you\'ve bought it',
+                            s.markPurchasedSub,
                             style: TextStyle(
                                 color: Colors.grey.shade500, fontSize: 12),
                           ),
@@ -310,7 +376,7 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
                     Switch(
                       value: _isPurchased,
                       onChanged: (v) => setState(() => _isPurchased = v),
-                      activeColor: AppTheme.mint,
+                      activeThumbColor: AppTheme.mint,
                     ),
                   ],
                 ),
@@ -322,7 +388,7 @@ class _AddEditGiftScreenState extends State<AddEditGiftScreen> {
                 child: ElevatedButton(
                   onPressed: _save,
                   child: Text(
-                      _isEditing ? '✓ Save Changes' : '+ Add Gift Idea'),
+                      _isEditing ? s.saveChanges : s.addGiftButton),
                 ),
               ).animate().fadeIn(delay: 225.ms).scale(delay: 225.ms),
             ],

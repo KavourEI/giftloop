@@ -2,6 +2,7 @@
     <!-- Re-registers scheduled birthday reminders after a reboot or app update;
          without this, pending reminders are dropped by the system. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.READ_CONTACTS"/>
 
     <application
         android:label="GiftLoop"
@@ -28,6 +29,14 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Opens shared GiftLoop cards (giftloop://share?d=...). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="giftloop"/>
+            </intent-filter>
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false"/>
         </activity>
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"

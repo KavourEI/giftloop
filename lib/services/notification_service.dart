@@ -1,18 +1,45 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart' hide Person;
+import 'package:flutter_local_notifications/flutter_local_notifications.dart'
+    hide Person;
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest_all.dart' as tz;
+import '../l10n/strings.dart';
 import '../models/person.dart';
 
+/// Birthday reminders.
+///
+/// Each person with a birthday gets two notifications at 09:00 local time:
+/// one 7 days before and one on the day. They repeat yearly on the same
+/// month/day, and are rebuilt from scratch whenever data changes or the app
+/// starts.
+///
+/// Previous bugs fixed here:
+///  * Reminders were scheduled with `DateTimeComponents.dayOfMonthAndTime`,
+///    which repeats **every month** on that day number — so people got
+///    "birthday in 7 days" alerts on the wrong months.
+///  * `tz.local` was never set, so it defaulted to UTC. Reminders were
+///    scheduled at 00:00 UTC, which in Greece is 02:00/03:00 and on the
+///    American side of UTC falls on the previous day.
 class NotificationService {
   static final _plugin = FlutterLocalNotificationsPlugin();
   static bool _initialized = false;
+
+  /// iOS keeps at most 64 pending local notifications per app; leave room.
+  static const _maxPending = 60;
+  static const _reminderHour = 9;
 
   static Future<void> init() async {
     if (_initialized) return;
     if (kIsWeb) return; // notifications not supported on web
 
     tz.initializeTimeZones();
+    try {
+      final info = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(info.identifier));
+    } catch (e) {
+      debugPrint('Could not resolve local timezone, using UTC: $e');
+    }
 
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const ios = DarwinInitializationSettings(
@@ -23,7 +50,8 @@ class NotificationService {
     const macOS = DarwinInitializationSettings();
 
     await _plugin.initialize(
-      settings: const InitializationSettings(android: android, iOS: ios, macOS: macOS),
+      settings: const InitializationSettings(
+          android: android, iOS: ios, macOS: macOS),
     );
     await _plugin
         .resolvePlatformSpecificImplementation<
@@ -33,72 +61,87 @@ class NotificationService {
     _initialized = true;
   }
 
-  static Future<void> scheduleAllBirthdayReminders(
-      List<Person> people) async {
-    if (kIsWeb) return;
+  static Future<void> scheduleAllBirthdayReminders(List<Person> people) async {
+    if (kIsWeb || !_initialized) return;
     await _plugin.cancelAll();
+
+    final now = tz.TZDateTime.now(tz.local);
+    final reminders = <_Reminder>[];
     for (final person in people) {
-      if (person.birthday != null) {
-        await scheduleBirthdayReminder(person);
+      final bday = person.birthdayInfo;
+      if (bday == null) continue;
+
+      // Week-before reminder: the next 09:00 that is 7 days before a birthday.
+      var y = now.year;
+      var weekBefore = _at(_weekBefore(bday.inYear(y)));
+      if (!weekBefore.isAfter(now)) {
+        weekBefore = _at(_weekBefore(bday.inYear(++y)));
+      }
+      reminders.add(_Reminder(person, weekBefore, isDayOf: false));
+
+      // On-the-day reminder.
+      y = now.year;
+      var dayOf = _at(bday.inYear(y));
+      if (!dayOf.isAfter(now)) dayOf = _at(bday.inYear(++y));
+      reminders.add(_Reminder(person, dayOf, isDayOf: true));
+    }
+
+    // Keep the soonest ones within the iOS limit; the rest get scheduled on a
+    // later app launch once these have fired.
+    reminders.sort((a, b) => a.when.compareTo(b.when));
+    final s = S.current;
+    final details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'birthday_channel',
+        s.notifChannelName,
+        channelDescription: s.notifChannelDesc,
+        importance: Importance.high,
+        priority: Priority.high,
+        icon: '@mipmap/ic_launcher',
+      ),
+      iOS: const DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: false,
+        presentSound: true,
+      ),
+    );
+
+    var id = 0;
+    for (final r in reminders.take(_maxPending)) {
+      try {
+        await _plugin.zonedSchedule(
+          id: id++,
+          title: r.isDayOf
+              ? s.notifDayTitle(r.person.name)
+              : s.notifWeekTitle(r.person.name),
+          body: r.isDayOf
+              ? s.notifDayBody
+              : s.notifWeekBody(
+                  r.person.giftIdeas.where((g) => !g.isPurchased).length),
+          scheduledDate: r.when,
+          notificationDetails: details,
+          // Inexact so no exact-alarm permission is needed on Android.
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          // Repeat yearly on the same month, day and time.
+          matchDateTimeComponents: DateTimeComponents.dateAndTime,
+        );
+      } catch (e) {
+        debugPrint('Notification scheduling failed: $e');
       }
     }
   }
 
-  static Future<void> scheduleBirthdayReminder(Person person) async {
-    if (kIsWeb || person.birthday == null) return;
+  // Calendar arithmetic, not `subtract(Duration)`: subtracting 168 hours
+  // across a daylight-saving change lands on 23:00 of the wrong day.
+  static DateTime _weekBefore(DateTime d) => DateTime(d.year, d.month, d.day - 7);
 
-    final bday = DateTime.parse(person.birthday!);
-    final now = DateTime.now();
+  static tz.TZDateTime _at(DateTime date) => tz.TZDateTime(
+      tz.local, date.year, date.month, date.day, _reminderHour);
+}
 
-    // Schedule 7 days before birthday
-    var reminderDate =
-        DateTime(now.year, bday.month, bday.day).subtract(const Duration(days: 7));
-    if (reminderDate.isBefore(now)) {
-      reminderDate = DateTime(now.year + 1, bday.month, bday.day)
-          .subtract(const Duration(days: 7));
-    }
-
-    final id = person.id.hashCode.abs() % 100000;
-
-    final androidDetails = const AndroidNotificationDetails(
-      'birthday_channel',
-      'Birthday Reminders',
-      channelDescription: 'Reminds you 7 days before a birthday',
-      importance: Importance.high,
-      priority: Priority.high,
-      icon: '@mipmap/ic_launcher',
-    );
-
-    final iosDetails = const DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-
-    final details = NotificationDetails(android: androidDetails, iOS: iosDetails, macOS: iosDetails);
-
-    try {
-      await _plugin.zonedSchedule(
-        id: id,
-        title: '🎁 ${person.name}\'s birthday is in 7 days!',
-        body: 'Time to get a gift! You have ${person.giftIdeas.length} gift idea(s) saved.',
-        scheduledDate: tz.TZDateTime.from(reminderDate, tz.local),
-        notificationDetails: details,
-        // Inexact so no exact-alarm permission is needed. The reminder fires a
-        // week ahead of the birthday, so a delivery window of minutes or hours
-        // is immaterial. A future settings page can offer exact timing (and a
-        // configurable lead time) behind a runtime permission request.
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        matchDateTimeComponents: DateTimeComponents.dayOfMonthAndTime,
-      );
-    } catch (e) {
-      debugPrint('Notification scheduling failed: $e');
-    }
-  }
-
-  static Future<void> cancelReminder(String personId) async {
-    if (kIsWeb) return;
-    final id = personId.hashCode.abs() % 100000;
-    await _plugin.cancel(id: id);
-  }
+class _Reminder {
+  final Person person;
+  final tz.TZDateTime when;
+  final bool isDayOf;
+  _Reminder(this.person, this.when, {required this.isDayOf});
 }

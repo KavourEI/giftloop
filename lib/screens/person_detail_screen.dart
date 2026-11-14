@@ -1,75 +1,91 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
+import '../l10n/strings.dart';
 import '../models/person.dart';
 import '../models/gift_idea.dart';
+import '../services/people_store.dart';
 import '../utils/app_theme.dart';
+import '../widgets/birthday_picker.dart';
+import '../widgets/person_avatar.dart';
 import 'add_edit_person_screen.dart';
 import 'add_edit_gift_screen.dart';
+import 'share_person_screen.dart';
 
-class PersonDetailScreen extends StatefulWidget {
-  final Person person;
-  final Future<void> Function(Person) onUpdate;
-  final Future<void> Function(String id) onDelete;
+class PersonDetailScreen extends StatelessWidget {
+  final String personId;
 
-  const PersonDetailScreen({
-    super.key,
-    required this.person,
-    required this.onUpdate,
-    required this.onDelete,
-  });
+  const PersonDetailScreen({super.key, required this.personId});
 
   @override
-  State<PersonDetailScreen> createState() => _PersonDetailScreenState();
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: PeopleStore.instance,
+      builder: (context, _) {
+        final person = PeopleStore.instance.byId(personId);
+        // Briefly null while popping after a delete.
+        if (person == null) return const Scaffold();
+        return _PersonDetailView(person: person);
+      },
+    );
+  }
 }
 
-class _PersonDetailScreenState extends State<PersonDetailScreen> {
-  late Person _person;
+class _PersonDetailView extends StatefulWidget {
+  final Person person;
+  const _PersonDetailView({required this.person});
 
   @override
-  void initState() {
-    super.initState();
-    _person = widget.person;
-  }
+  State<_PersonDetailView> createState() => _PersonDetailScreenState();
+}
+
+class _PersonDetailScreenState extends State<_PersonDetailView> {
+  Person get _person => widget.person;
+  final _store = PeopleStore.instance;
+
+  Future<void> _save() => _store.update(_person);
 
   Future<void> _editPerson() async {
     final updated = await Navigator.push<Person>(
       context,
-      MaterialPageRoute(
-          builder: (_) => AddEditPersonScreen(person: _person)),
+      MaterialPageRoute(builder: (_) => AddEditPersonScreen(person: _person)),
     );
-    if (updated != null) {
-      setState(() => _person = updated);
-      await widget.onUpdate(_person);
-    }
+    if (updated != null) await _store.update(updated);
+  }
+
+  void _sharePerson() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => SharePersonScreen(person: _person)),
+    );
   }
 
   Future<void> _deletePerson() async {
+    final s = S.of(context);
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Person?'),
-        content: Text(
-            'This will remove ${_person.name} and all their gift ideas.'),
+        title: Text(s.deletePersonTitle),
+        content: Text(s.deletePersonBody(_person.name)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(s.cancel),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child:
-                const Text('Delete', style: TextStyle(color: Colors.red)),
+            child: Text(s.delete, style: const TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
     if (confirm == true && mounted) {
-      await widget.onDelete(_person.id);
-      Navigator.pop(context);
+      final nav = Navigator.of(context);
+      final id = _person.id;
+      nav.pop();
+      await _store.delete(id);
     }
   }
 
@@ -79,8 +95,8 @@ class _PersonDetailScreenState extends State<PersonDetailScreen> {
       MaterialPageRoute(builder: (_) => const AddEditGiftScreen()),
     );
     if (gift != null) {
-      setState(() => _person.giftIdeas.add(gift));
-      await widget.onUpdate(_person);
+      _person.giftIdeas.add(gift);
+      await _save();
     }
   }
 
@@ -91,29 +107,30 @@ class _PersonDetailScreenState extends State<PersonDetailScreen> {
           builder: (_) => AddEditGiftScreen(gift: gift)),
     );
     if (updated != null) {
-      setState(() => _person.giftIdeas[index] = updated);
-      await widget.onUpdate(_person);
+      _person.giftIdeas[index] = updated;
+      await _save();
     }
   }
 
   Future<void> _deleteGift(int index) async {
-    setState(() => _person.giftIdeas.removeAt(index));
-    await widget.onUpdate(_person);
+    _person.giftIdeas.removeAt(index);
+    await _save();
   }
 
   Future<void> _togglePurchased(int index) async {
-    setState(() {
-      _person.giftIdeas[index] = _person.giftIdeas[index]
-          .copyWith(isPurchased: !_person.giftIdeas[index].isPurchased);
-    });
-    await widget.onUpdate(_person);
+    _person.giftIdeas[index] = _person.giftIdeas[index]
+        .copyWith(isPurchased: !_person.giftIdeas[index].isPurchased);
+    await _save();
   }
 
   @override
   Widget build(BuildContext context) {
+    final s = S.of(context);
     final days = _person.daysUntilBirthday;
-    final gradientColors =
-        AppTheme.cardGradientFor(_person.id.hashCode.abs());
+    final bday = _person.birthdayInfo;
+    final gradientColors = AppTheme.cardGradientFor(
+        PeopleStore.instance.people.indexWhere((p) => p.id == _person.id));
+    final bg = personBackground(_person.backgroundImage);
 
     return Scaffold(
       body: CustomScrollView(
@@ -126,14 +143,19 @@ class _PersonDetailScreenState extends State<PersonDetailScreen> {
             iconTheme: const IconThemeData(color: Colors.white),
             actions: [
               IconButton(
+                icon: const Icon(Icons.ios_share_rounded),
+                onPressed: _sharePerson,
+                tooltip: s.share,
+              ),
+              IconButton(
                 icon: const Icon(Icons.edit_rounded),
                 onPressed: _editPerson,
-                tooltip: 'Edit',
+                tooltip: s.edit,
               ),
               IconButton(
                 icon: const Icon(Icons.delete_outline_rounded),
                 onPressed: _deletePerson,
-                tooltip: 'Delete',
+                tooltip: s.delete,
               ),
             ],
             flexibleSpace: FlexibleSpaceBar(
@@ -145,25 +167,22 @@ class _PersonDetailScreenState extends State<PersonDetailScreen> {
                     end: Alignment.bottomRight,
                   ),
                 ),
-                child: SafeArea(
+                child: Stack(fit: StackFit.expand, children: [
+                  ?bg,
+                  SafeArea(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(24, 60, 24, 16),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Container(
-                          width: 72,
-                          height: 72,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.25),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
-                            child: Text(
-                              _person.avatarEmoji ?? '🎁',
-                              style: const TextStyle(fontSize: 38),
-                            ),
-                          ),
+                        PersonAvatar(
+                          imageName: _person.avatarImage,
+                          emoji: _person.avatarEmoji,
+                          size: 72,
+                          background: Colors.white.withValues(alpha: 0.25),
+                          borderColor: _person.avatarImage != null
+                              ? Colors.white
+                              : null,
                         ),
                         const SizedBox(width: 16),
                         Expanded(
@@ -179,11 +198,11 @@ class _PersonDetailScreenState extends State<PersonDetailScreen> {
                                   fontWeight: FontWeight.w800,
                                 ),
                               ),
-                              if (_person.birthday != null)
+                              if (bday != null)
                                 Text(
-                                  '🎂 ${DateFormat('MMMM d').format(DateTime.parse(_person.birthday!))}${days != null ? ' · $days days away' : ''}',
+                                  '🎂 ${formatBirthday(context, bday, withYear: false)}${days != null ? ' · ${s.daysAway(days)}' : ''}',
                                   style: TextStyle(
-                                    color: Colors.white.withOpacity(0.9),
+                                    color: Colors.white.withValues(alpha: 0.9),
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -195,6 +214,7 @@ class _PersonDetailScreenState extends State<PersonDetailScreen> {
                     ),
                   ),
                 ),
+                ]),
               ),
             ),
           ),
@@ -211,21 +231,22 @@ class _PersonDetailScreenState extends State<PersonDetailScreen> {
                     children: [
                       _StatChip(
                         icon: Icons.card_giftcard_rounded,
-                        label: '${_person.giftIdeas.length} ideas',
+                        label: s.ideasStat(_person.giftIdeas.length),
                         color: AppTheme.sky,
                       ),
                       const SizedBox(width: 10),
                       _StatChip(
                         icon: Icons.check_circle_rounded,
-                        label:
-                            '${_person.giftIdeas.where((g) => g.isPurchased).length} bought',
+                        label: s.boughtStat(_person.giftIdeas
+                            .where((g) => g.isPurchased)
+                            .length),
                         color: AppTheme.mint,
                       ),
                       if (_person.hasBirthdaySoon) ...[
                         const SizedBox(width: 10),
                         _StatChip(
                           icon: Icons.cake_rounded,
-                          label: 'Soon! 🎉',
+                          label: s.soon,
                           color: AppTheme.sunflower,
                         ),
                       ],
@@ -241,10 +262,10 @@ class _PersonDetailScreenState extends State<PersonDetailScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: AppTheme.lavender.withOpacity(0.1),
+                        color: AppTheme.lavender.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                            color: AppTheme.lavender.withOpacity(0.3)),
+                            color: AppTheme.lavender.withValues(alpha: 0.3)),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -270,14 +291,14 @@ class _PersonDetailScreenState extends State<PersonDetailScreen> {
                   padding: const EdgeInsets.fromLTRB(24, 28, 24, 12),
                   child: Row(
                     children: [
-                      Text('Gift Ideas',
+                      Text(s.giftIdeas,
                           style:
                               Theme.of(context).textTheme.headlineMedium),
                       const Spacer(),
                       TextButton.icon(
                         onPressed: _addGift,
                         icon: const Icon(Icons.add_rounded, size: 18),
-                        label: const Text('Add Idea'),
+                        label: Text(s.addIdea),
                         style: TextButton.styleFrom(
                           foregroundColor: AppTheme.coral,
                           textStyle: const TextStyle(
@@ -303,12 +324,12 @@ class _PersonDetailScreenState extends State<PersonDetailScreen> {
                           style: TextStyle(fontSize: 48)),
                       const SizedBox(height: 12),
                       Text(
-                        'No gift ideas yet!',
+                        s.noGiftIdeas,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Tap "Add Idea" to save gift ideas for ${_person.name}',
+                        s.noGiftIdeasSub(_person.name),
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.grey.shade500),
                       ),
@@ -345,8 +366,7 @@ class _PersonDetailScreenState extends State<PersonDetailScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _addGift,
         icon: const Icon(Icons.add_rounded),
-        label: const Text('Add Gift Idea',
-            style: TextStyle(fontWeight: FontWeight.w700)),
+        label: Text(s.addGiftIdea),
       ).animate().scale(delay: 400.ms),
     );
   }
@@ -365,7 +385,7 @@ class _StatChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -376,7 +396,7 @@ class _StatChip extends StatelessWidget {
           Text(
             label,
             style: TextStyle(
-              color: color.withOpacity(0.9),
+              color: color.withValues(alpha: 0.9),
               fontWeight: FontWeight.w700,
               fontSize: 13,
             ),
@@ -424,17 +444,17 @@ class _GiftCard extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             color: gift.isPurchased
-                ? AppTheme.mint.withOpacity(0.08)
+                ? AppTheme.mint.withValues(alpha: 0.08)
                 : Colors.white,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: gift.isPurchased
-                  ? AppTheme.mint.withOpacity(0.4)
+                  ? AppTheme.mint.withValues(alpha: 0.4)
                   : Colors.grey.shade100,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.04),
+                color: Colors.black.withValues(alpha: 0.04),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -498,11 +518,11 @@ class _GiftCard extends StatelessWidget {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: AppTheme.sunflower.withOpacity(0.15),
+                                color: AppTheme.sunflower.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
-                                '${gift.currency ?? '\$'}${gift.estimatedPrice!.toStringAsFixed(0)}',
+                                gift.priceLabel!,
                                 style: TextStyle(
                                   color: const Color(0xFF5D3000),
                                   fontSize: 12,
@@ -515,7 +535,7 @@ class _GiftCard extends StatelessWidget {
                       if (gift.category != null) ...[
                         const SizedBox(height: 4),
                         Text(
-                          gift.category!,
+                          S.of(context).categoryLabel(gift.category!),
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.grey.shade500,
@@ -543,7 +563,7 @@ class _GiftCard extends StatelessWidget {
                           if (gift.link != null && gift.link!.isNotEmpty)
                             _InfoTag(
                               icon: Icons.link_rounded,
-                              label: 'Link',
+                              label: S.of(context).link,
                               color: AppTheme.sky,
                               onTap: () async {
                                 final uri = Uri.tryParse(gift.link!);
@@ -605,7 +625,7 @@ class _InfoTag extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.12),
+          color: color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(

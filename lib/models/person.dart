@@ -1,11 +1,22 @@
 import 'dart:convert';
+import 'birthday.dart';
 import 'gift_idea.dart';
 
 class Person {
   final String id;
   String name;
-  String? birthday; // ISO date string e.g. "2024-06-15"
+
+  /// `YYYY-MM-DD`, or `--MM-DD` when the year is unknown. See [Birthday].
+  String? birthday;
   String? avatarEmoji;
+
+  /// File names (not full paths) inside the app's images folder. Full paths
+  /// change between installs on iOS, so only the name is stored.
+  String? avatarImage;
+  String? backgroundImage;
+
+  /// Identifier of the device contact this person was imported from.
+  String? contactId;
   String? notes;
   List<GiftIdea> giftIdeas;
   DateTime createdAt;
@@ -15,23 +26,19 @@ class Person {
     required this.name,
     this.birthday,
     this.avatarEmoji,
+    this.avatarImage,
+    this.backgroundImage,
+    this.contactId,
     this.notes,
     List<GiftIdea>? giftIdeas,
     DateTime? createdAt,
   })  : giftIdeas = giftIdeas ?? [],
         createdAt = createdAt ?? DateTime.now();
 
+  Birthday? get birthdayInfo => Birthday.tryParse(birthday);
+
   /// Days until next birthday (returns null if no birthday set)
-  int? get daysUntilBirthday {
-    if (birthday == null) return null;
-    final bday = DateTime.parse(birthday!);
-    final now = DateTime.now();
-    var next = DateTime(now.year, bday.month, bday.day);
-    if (next.isBefore(DateTime(now.year, now.month, now.day))) {
-      next = DateTime(now.year + 1, bday.month, bday.day);
-    }
-    return next.difference(DateTime(now.year, now.month, now.day)).inDays;
-  }
+  int? get daysUntilBirthday => birthdayInfo?.daysUntil();
 
   bool get hasBirthdaySoon {
     final d = daysUntilBirthday;
@@ -43,6 +50,9 @@ class Person {
         'name': name,
         'birthday': birthday,
         'avatarEmoji': avatarEmoji,
+        'avatarImage': avatarImage,
+        'backgroundImage': backgroundImage,
+        'contactId': contactId,
         'notes': notes,
         'giftIdeas': giftIdeas.map((g) => g.toJson()).toList(),
         'createdAt': createdAt.toIso8601String(),
@@ -53,6 +63,9 @@ class Person {
         name: json['name'],
         birthday: json['birthday'],
         avatarEmoji: json['avatarEmoji'],
+        avatarImage: json['avatarImage'],
+        backgroundImage: json['backgroundImage'],
+        contactId: json['contactId'],
         notes: json['notes'],
         giftIdeas: (json['giftIdeas'] as List<dynamic>? ?? [])
             .map((g) => GiftIdea.fromJson(g))
